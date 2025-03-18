@@ -43,6 +43,18 @@ CONFLUENCE_BASE_URL = os.getenv('CONFLUENCE_BASE_URL')
 CONFLUENCE_USERNAME = os.getenv('CONFLUENCE_USERNAME')
 CONFLUENCE_API_TOKEN = os.getenv('CONFLUENCE_API_TOKEN')
 
+# Cache for user information to avoid repeated API calls
+USER_CACHE = {}
+
+# Enable or disable fetching user avatars
+FETCH_USER_AVATARS = False  # Set to True to enable avatar fetching
+
+# Enable or disable verbose logging for user mention processing
+VERBOSE_USER_LOGS = False  # Set to True to see detailed logs about user mention processing
+
+# Enable or disable user resolution (enabled by default)
+RESOLVE_USERS = True  # Always resolve user mentions by default
+
 # Email style settings
 EMAIL_CSS = """
 <style>
@@ -148,6 +160,32 @@ EMAIL_CSS = """
         font-size: 12px;
         color: #5e6c84;
     }
+    .confluence-user-mention {
+        color: #0052CC;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+    .confluence-user-mention-with-avatar {
+        display: inline-flex;
+        align-items: center;
+        color: #0052CC;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+    .user-avatar {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        margin-right: 4px;
+        vertical-align: middle;
+    }
+    .confluence-emoticon {
+        margin: 0 2px;
+    }
+    .confluence-page-link {
+        color: #0052CC;
+        font-weight: 500;
+    }
 </style>
 """
 
@@ -178,6 +216,220 @@ def get_confluence_page(page_id):
         if hasattr(e, 'response') and e.response:
             print(f"Response: {e.response.text}")
         raise
+
+
+def get_user_info(account_id):
+    """
+    Fetch user information from Confluence API.
+    Returns a dictionary with user details or None if not available.
+    Uses a cache to avoid repeated API calls for the same user.
+    """
+    # Return from cache if available
+    if account_id in USER_CACHE:
+        return USER_CACHE[account_id]
+    
+    if not CONFLUENCE_BASE_URL:
+        return None
+    
+    # If account_id is empty, return None
+    if not account_id:
+        return None
+    
+    try:
+        # Use the Confluence REST API to get user info
+        url = f"{CONFLUENCE_BASE_URL}/rest/api/user?accountId={account_id}&expand=profilePicture"
+        response = requests.get(url, headers=get_auth_header())
+        
+        # If successful, parse the response
+        if response.status_code == 200:
+            user_data = response.json()
+            # Store in cache
+            USER_CACHE[account_id] = user_data
+            return user_data
+        
+        # Handle user not found
+        if response.status_code == 404:
+            # Cache the "not found" result to avoid repeated lookups
+            USER_CACHE[account_id] = None
+            return None
+        
+        # Other errors
+        response.raise_for_status()
+    
+    except Exception as e:
+        print(f"Error fetching user information for account ID {account_id}: {e}")
+        # Cache the error result
+        USER_CACHE[account_id] = None
+        return None
+
+
+def extract_username_from_mention(user_element):
+    """
+    Extract a meaningful username from a user mention element.
+    Tries multiple approaches to get the best available username representation.
+    Includes API lookup for user information when needed.
+    """
+    account_id = user_element.get('ri:account-id', '')
+    
+    if VERBOSE_USER_LOGS:
+        print(f"Processing user mention with account ID: {account_id}")
+    
+    # First, check if there's a direct text representation in the parent link
+    parent_link = user_element.find_parent('ac:link')
+    if parent_link and parent_link.find('ac:link-body'):
+        link_body = parent_link.find('ac:link-body')
+        # Extract text from link body if available
+        if link_body.string:
+            if VERBOSE_USER_LOGS:
+                print(f"  Found username in link body string: {link_body.string}")
+            return link_body.string
+        # Or try to get text from any child elements
+        link_text = ' '.join(link_body.stripped_strings)
+        if link_text:
+            if VERBOSE_USER_LOGS:
+                print(f"  Found username in link body text: {link_text}")
+            return link_text
+    
+    # Next, look for full-name or display-name attributes
+    full_name = user_element.get('ri:full-name', '')
+    if full_name:
+        if VERBOSE_USER_LOGS:
+            print(f"  Found username in full-name attribute: {full_name}")
+        return full_name
+    
+    display_name = user_element.get('ri:display-name', '')
+    if display_name:
+        if VERBOSE_USER_LOGS:
+            print(f"  Found username in display-name attribute: {display_name}")
+        return display_name
+    
+    # Try to extract from an adjacent user profile link if exists
+    next_sibling = user_element.find_next_sibling()
+    if next_sibling and next_sibling.name == 'ri:user-profile':
+        profile_name = next_sibling.get('ri:display-name', '')
+        if profile_name:
+            if VERBOSE_USER_LOGS:
+                print(f"  Found username in user-profile: {profile_name}")
+            return profile_name
+    
+    # Try to find a username attribute
+    username = user_element.get('ri:username', '')
+    if username:
+        username_with_at = f"@{username}"
+        if VERBOSE_USER_LOGS:
+            print(f"  Found username attribute: {username_with_at}")
+        return username_with_at
+    
+    # As a last resort, try to lookup the user via API
+    if account_id:
+        if VERBOSE_USER_LOGS:
+            print(f"  Attempting API lookup for user with account ID: {account_id}")
+        user_info = get_user_info(account_id)
+        if user_info:
+            # Use the display name if available, otherwise use the username
+            if 'displayName' in user_info and user_info['displayName']:
+                display_name = user_info['displayName']
+                if VERBOSE_USER_LOGS:
+                    print(f"  Found display name via API: {display_name}")
+                return display_name
+            elif 'username' in user_info and user_info['username']:
+                username_with_at = f"@{user_info['username']}"
+                if VERBOSE_USER_LOGS:
+                    print(f"  Found username via API: {username_with_at}")
+                return username_with_at
+    
+    # If we couldn't extract a meaningful name, return None
+    if VERBOSE_USER_LOGS:
+        print(f"  Could not find username for account ID: {account_id}")
+    return None
+
+
+def process_user_mentions(soup):
+    """
+    Process all user mentions in the HTML and replace them with proper display format.
+    This function handles both <ri:user> tags and @mentions in text.
+    """
+    # First process explicit <ri:user> tags
+    for user in soup.find_all('ri:user'):
+        account_id = user.get('ri:account-id', '')
+        
+        # Try to extract username from the user mention context
+        username = None
+        if RESOLVE_USERS:
+            username = extract_username_from_mention(user)
+            
+        if not username:
+            # Fallback to @username if available, or @user-ID if nothing else is available
+            username = user.get('ri:username', f"@user-{account_id}")
+            # Remove @ if it already has one (to avoid @@username)
+            if username.startswith('@'):
+                username = username[1:]
+            # Add @ prefix for all usernames
+            username = f"@{username}"
+        
+        # Check if we should include avatar
+        avatar_url = None
+        if FETCH_USER_AVATARS and account_id and RESOLVE_USERS:
+            user_info = get_user_info(account_id)
+            if user_info and 'profilePicture' in user_info:
+                profile_pic = user_info.get('profilePicture', {})
+                if 'path' in profile_pic:
+                    avatar_url = f"{CONFLUENCE_BASE_URL}{profile_pic['path']}"
+        
+        # Create different markup based on whether we have an avatar
+        if avatar_url:
+            user_span = soup.new_tag('span')
+            user_span['class'] = 'confluence-user-mention-with-avatar'
+            
+            avatar_img = soup.new_tag('img')
+            avatar_img['src'] = avatar_url
+            avatar_img['class'] = 'user-avatar'
+            avatar_img['alt'] = username
+            
+            user_span.append(avatar_img)
+            user_span.append(username)
+        else:
+            user_span = soup.new_tag('span')
+            user_span['class'] = 'confluence-user-mention'
+            user_span.string = username
+        
+        # If inside a link, replace the whole link
+        parent_link = user.find_parent('ac:link')
+        if parent_link:
+            parent_link.replace_with(user_span)
+        else:
+            user.replace_with(user_span)
+    
+    # Now try to find @user-XXXXXX patterns in text and replace them
+    if RESOLVE_USERS:
+        for tag in soup.find_all(string=re.compile(r'@user-[a-zA-Z0-9]+')):
+            if tag.parent.name == 'code' or tag.parent.name == 'pre':
+                # Skip user mentions inside code blocks
+                continue
+            
+            new_content = tag
+            # Find all @user-XXXX patterns
+            for match in re.finditer(r'@user-([a-zA-Z0-9]+)', tag):
+                account_id = match.group(1)
+                user_id_mention = match.group(0)  # The full @user-XXXX
+                
+                if VERBOSE_USER_LOGS:
+                    print(f"Found text mention: {user_id_mention}")
+                
+                # Try to lookup user info
+                user_info = get_user_info(account_id)
+                if user_info and 'displayName' in user_info:
+                    display_name = user_info['displayName']
+                    # Replace the @user-XXXX with the display name
+                    new_content = new_content.replace(user_id_mention, display_name)
+                    if VERBOSE_USER_LOGS:
+                        print(f"  Replaced {user_id_mention} with {display_name}")
+            
+            # If content was changed, update the node
+            if new_content != tag:
+                tag.replace_with(new_content)
+    
+    return soup
 
 
 def process_macro_placeholders(html_content, page_id):
@@ -246,21 +498,8 @@ def process_macro_placeholders(html_content, page_id):
         emoji_span.string = emoji_text
         emoticon.replace_with(emoji_span)
     
-    # Process user mentions
-    for user in soup.find_all('ri:user'):
-        account_id = user.get('ri:account-id', '')
-        username = f"@user-{account_id}"
-        
-        user_span = soup.new_tag('span')
-        user_span['class'] = 'confluence-user-mention'
-        user_span.string = username
-        
-        # If inside a link, replace the whole link
-        parent_link = user.find_parent('ac:link')
-        if parent_link:
-            parent_link.replace_with(user_span)
-        else:
-            user.replace_with(user_span)
+    # Process all user mentions
+    soup = process_user_mentions(soup)
     
     # Process page links
     for page_link in soup.find_all('ri:page'):
@@ -635,16 +874,41 @@ def main():
     parser.add_argument('--username', help='Confluence username (overrides environment variable)')
     parser.add_argument('--token', help='Confluence API token (overrides environment variable)')
     
+    # User mention processing options
+    parser.add_argument('--no-resolve-users', action='store_true', 
+                       help='Disable resolution of @user-IDs to real names (enabled by default)')
+    parser.add_argument('--fetch-avatars', action='store_true',
+                       help='Fetch user avatars for user mentions')
+    parser.add_argument('--verbose-user-logs', action='store_true',
+                       help='Enable verbose logging of user mention processing')
+    
     args = parser.parse_args()
     
     # Override environment variables if provided in arguments
     global CONFLUENCE_BASE_URL, CONFLUENCE_USERNAME, CONFLUENCE_API_TOKEN
+    global FETCH_USER_AVATARS, VERBOSE_USER_LOGS, RESOLVE_USERS
+    
     if args.base_url:
         CONFLUENCE_BASE_URL = args.base_url
     if args.username:
         CONFLUENCE_USERNAME = args.username
     if args.token:
         CONFLUENCE_API_TOKEN = args.token
+    
+    # Set user mention processing options
+    if args.no_resolve_users:
+        RESOLVE_USERS = False
+        print("User resolution via API disabled")
+    else:
+        print("User resolution via API enabled (default)")
+    
+    if args.fetch_avatars:
+        FETCH_USER_AVATARS = True
+        print("User avatar fetching enabled")
+    
+    if args.verbose_user_logs:
+        VERBOSE_USER_LOGS = True
+        print("Verbose user mention logging enabled")
     
     # Check and set up environment variables if needed
     check_and_setup_env_variables()

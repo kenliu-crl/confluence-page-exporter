@@ -12,6 +12,7 @@ A Python tool that extracts content from Confluence pages and converts it to ema
 - Generate plain text versions of the content (optional)
 - Automatically handle authentication and configuration
 - Batch processing for exporting multiple pages at once
+- Automatic resolution of user mentions from alphanumeric IDs to real names
 
 ## Requirements
 
@@ -96,6 +97,9 @@ https://yourcompany.atlassian.net/wiki/spaces/DOCS/pages/345678/User+Guide
 - `--username USERNAME`: Confluence username (overrides environment variable)
 - `--token TOKEN`: Confluence API token (overrides environment variable)
 - `--batch FILE`: File containing list of Confluence URLs to process in batch
+- `--no-resolve-users`: Disable resolution of @user-IDs to real names (enabled by default)
+- `--fetch-avatars`: Fetch user avatars for mentions
+- `--verbose-user-logs`: Enable detailed logging of user mention processing
 
 ### Examples
 
@@ -114,6 +118,11 @@ Export multiple pages to an 'exports' directory with text versions:
 python3 confluence-email-exporter.py --batch sample_urls.txt --output-dir exports --text
 ```
 
+Export multiple pages with avatars:
+```
+python3 confluence-email-exporter.py --batch sample_urls.txt --output-dir exports --fetch-avatars
+```
+
 ## Supported Confluence Elements
 
 The exporter handles various Confluence-specific elements:
@@ -123,10 +132,25 @@ The exporter handles various Confluence-specific elements:
 - **Tables**: Including cell background colors
 - **Images**: Both embedded and linked
 - **Emoticons**: Preserves emoji characters
-- **User Mentions**: Shows as @user-ID
+- **User Mentions**: Automatically resolves @user-ID to real names (can be disabled with `--no-resolve-users`)
 - **Page Links**: Preserves linked page titles
 - **Block Quotes**: Properly formatted with styling
 - **ADF Content**: Support for newer Atlassian Document Format
+
+## User Mention Resolution
+
+By default, user mentions in Confluence content (which appear as alphanumeric IDs like `@user-610abc0c8c15ca006f7feef1`) are automatically resolved to real names in the exported content.
+
+The tool uses this process:
+1. First attempt to extract the real username from the Confluence page content
+2. If not found there, make API calls to the Confluence user endpoint to resolve user IDs to real names
+3. Replace all occurrences of `@user-ID` with the actual display name or username of the person
+
+This makes the exported content much more readable. To disable this feature, use:
+
+```
+python3 confluence-email-exporter.py URL --no-resolve-users
+```
 
 ## License
 
