@@ -865,7 +865,7 @@ def main():
     # Create a mutually exclusive group for URL or batch file
     url_group = parser.add_mutually_exclusive_group(required=True)
     url_group.add_argument('url', nargs='?', help='Confluence page URL to export')
-    url_group.add_argument('--batch', help='File containing list of Confluence URLs to process')
+    url_group.add_argument('--batch-file', help='File containing list of Confluence URLs to process')
     
     parser.add_argument('--output', help='Output file path (default: confluence_export.html)')
     parser.add_argument('--output-dir', help='Directory to save output files (for batch processing)')
@@ -913,54 +913,48 @@ def main():
     # Check and set up environment variables if needed
     check_and_setup_env_variables()
     
-    # Handle batch processing
-    if args.batch:
-        urls = read_urls_from_file(args.batch)
-        if not urls:
-            print("No valid URLs to process.")
-            return 1
-        
-        print(f"Processing {len(urls)} URLs...")
-        success_count = 0
-        
-        for url in urls:
-            if process_single_url(url, args.output_dir, args.text):
-                success_count += 1
-        
-        print(f"Completed processing {success_count} out of {len(urls)} URLs successfully.")
-        return 0 if success_count == len(urls) else 1
-    
-    # Handle single URL processing
+    # Process a single URL or batch file
     if args.url:
-        # Set default output file if not provided
         output_file = args.output or 'confluence_export.html'
+        if process_single_url(args.url, output_file=output_file, generate_text=args.text):
+            print(f"Export completed successfully to {output_file}")
+        else:
+            print(f"Export failed for {args.url}")
+            sys.exit(1)
+    else:  # Batch processing
+        if not args.batch_file:
+            print("Error: No batch file specified")
+            sys.exit(1)
         
         try:
-            # Extract page ID from URL
-            page_id = extract_page_id_from_url(args.url)
-            print(f"Extracted page ID: {page_id}")
+            with open(args.batch_file, 'r') as f:
+                urls = [line.strip() for line in f if line.strip() and not line.strip().startswith('#')]
             
-            # Fetch the page data from Confluence
-            page_data = get_confluence_page(page_id)
+            if not urls:
+                print(f"No valid URLs found in {args.batch_file}")
+                sys.exit(1)
             
-            # Create email HTML
-            email_html = create_email_html(page_data)
+            print(f"Processing {len(urls)} URLs...")
             
-            # Save the HTML output
-            save_output(email_html, output_file)
+            output_dir = args.output_dir or os.path.splitext(args.batch_file)[0] + '_exports'
+            successful = 0
             
-            # Generate and save plain text version if requested
-            if args.text:
-                plain_text = convert_to_plain_text(email_html)
-                text_output_file = output_file.replace('.html', '.txt')
-                save_output(plain_text, text_output_file, is_html=False)
-                print(f"Plain text version saved to {text_output_file}")
+            for url in urls:
+                if process_single_url(url, output_dir=output_dir, generate_text=args.text):
+                    successful += 1
             
+            print(f"Completed processing {successful} out of {len(urls)} URLs successfully.")
+            
+            if successful < len(urls):
+                print(f"Warning: {len(urls) - successful} URLs failed to process.")
+                sys.exit(1)
+                
+        except FileNotFoundError:
+            print(f"Error: Batch file {args.batch_file} not found")
+            sys.exit(1)
         except Exception as e:
-            print(f"Error: {e}")
-            return 1
-    
-    return 0
+            print(f"Error processing batch file: {e}")
+            sys.exit(1)
 
 
 if __name__ == "__main__":
