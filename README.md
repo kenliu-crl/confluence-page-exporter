@@ -152,6 +152,61 @@ This makes the exported content much more readable. To disable this feature, use
 python3 confluence-email-exporter.py URL --no-resolve-users
 ```
 
+## Development
+
+### Running Tests
+
+The exporter comes with unit tests to ensure everything works correctly. To run the tests:
+
+```
+python3 -m unittest test_confluence_exporter.py
+```
+
+The tests cover:
+- URL parsing and page ID extraction
+- User mention resolution
+- Confluence macro handling
+- HTML to plain text conversion
+- API integration
+
+### Test Coverage
+
+The unit tests cover the most important aspects of the functionality:
+
+1. **URL Parsing**: Tests various Confluence URL formats to ensure page IDs are correctly extracted.
+2. **User Resolution**: Tests the core feature of resolving user mentions from alphanumeric IDs to real names.
+3. **Macro Processing**: Tests the conversion of Confluence macros like panels, code blocks, and emoticons to HTML.
+4. **HTML to Text Conversion**: Tests the conversion of HTML content to plain text format.
+5. **API Mocking**: Uses mock objects to simulate API responses and test handling of various scenarios.
+
+### Writing New Tests
+
+To add new tests for additional functionality:
+
+1. Create a new test method in the `TestConfluenceExporter` class in `test_confluence_exporter.py`.
+2. Use Python's `unittest.mock` to mock any external dependencies like API calls.
+3. Create simple HTML samples that represent Confluence content.
+4. Test both the normal flow and edge cases.
+
+Example of adding a new test:
+
+```python
+def test_my_new_feature(self):
+    # Create sample input
+    sample_html = """
+    <div>
+        <!-- Your test HTML -->
+    </div>
+    """
+    
+    # Call the function being tested
+    result = my_function(sample_html)
+    
+    # Assert expected outcomes
+    self.assertIn("expected output", result)
+    self.assertNotIn("unwanted output", result)
+```
+
 ## License
 
 This project is licensed under the terms of the included LICENSE file. 
