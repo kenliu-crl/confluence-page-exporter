@@ -1,0 +1,4 @@
+requests>=2.25.0
+beautifulsoup4>=4.9.0
+html2text>=2020.1.16
+python-dotenv>=0.15.0
