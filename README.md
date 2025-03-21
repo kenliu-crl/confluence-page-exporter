@@ -1,4 +1,4 @@
-# Confluence Email Exporter
+# Confluence Page Exporter
 
 A Python tool that extracts content from Confluence pages and converts it to email-friendly HTML format with proper styling.
 
@@ -26,8 +26,8 @@ A Python tool that extracts content from Confluence pages and converts it to ema
 
 1. Clone this repository:
    ```
-   git clone https://github.com/yourusername/confluence-email-exporter.git
-   cd confluence-email-exporter
+   git clone https://github.com/yourusername/confluence-page-exporter.git
+   cd confluence-page-exporter
    ```
 
 2. Set up a virtual environment (recommended):
@@ -63,7 +63,7 @@ These credentials will be saved to a `.env` file in the project directory for fu
 
 Basic usage:
 ```
-python3 confluence-email-exporter.py CONFLUENCE_PAGE_URL
+python3 confluence-page-exporter.py CONFLUENCE_PAGE_URL
 ```
 
 Where `CONFLUENCE_PAGE_URL` is the full URL of the Confluence page you want to export. The script will automatically extract the page ID from the URL.
@@ -72,7 +72,7 @@ Where `CONFLUENCE_PAGE_URL` is the full URL of the Confluence page you want to e
 
 To process multiple Confluence pages at once:
 ```
-python3 confluence-email-exporter.py --batch-file urls_file.txt --output-dir exports
+python3 confluence-page-exporter.py --batch-file urls_file.txt --output-dir exports
 ```
 
 The `urls_file.txt` should contain one Confluence URL per line. Empty lines and lines starting with `#` are ignored.
@@ -101,17 +101,17 @@ https://yourcompany.atlassian.net/wiki/spaces/DOCS/pages/345678/User+Guide
 
 Export a page using its URL:
 ```
-python3 confluence-email-exporter.py "https://yourcompany.atlassian.net/wiki/spaces/SPACE/pages/123456/Page+Title"
+python3 confluence-page-exporter.py "https://yourcompany.atlassian.net/wiki/spaces/SPACE/pages/123456/Page+Title"
 ```
 
 Export a page to a specific file and generate a text version:
 ```
-python3 confluence-email-exporter.py "https://yourcompany.atlassian.net/wiki/spaces/SPACE/pages/123456/Page+Title" --output my_page.html --text
+python3 confluence-page-exporter.py "https://yourcompany.atlassian.net/wiki/spaces/SPACE/pages/123456/Page+Title" --output my_page.html --text
 ```
 
 Export multiple pages to an 'exports' directory with text versions:
 ```
-python3 confluence-email-exporter.py --batch-file sample_urls.txt --output-dir exports --text
+python3 confluence-page-exporter.py --batch-file sample_urls.txt --output-dir exports --text
 ```
 
 

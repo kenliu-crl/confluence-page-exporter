@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Confluence to Email Exporter
+Confluence Page Exporter
 
 This script extracts content from Confluence pages and converts it to
 email-friendly HTML format with proper styling.
@@ -14,8 +14,8 @@ Requirements:
 
 Usage:
 1. Set your Confluence credentials in .env file or as environment variables
-2. Run: python confluence_email_exporter.py CONFLUENCE_PAGE_URL [--output OUTPUT_FILE]
-3. For batch processing: python confluence_email_exporter.py --batch URLS_FILE
+2. Run: python confluence-page-exporter.py CONFLUENCE_PAGE_URL [--output OUTPUT_FILE]
+3. For batch processing: python confluence-page-exporter.py --batch URLS_FILE
 """
 
 import os
@@ -857,7 +857,7 @@ def process_single_url(url, output_dir=None, generate_text=False):
 
 def main():
     """Main function to run the script"""
-    print("Confluence Email Exporter")
+    print("Confluence Page Exporter")
     print("------------------------")
     
     parser = argparse.ArgumentParser(description='Export Confluence page to email-friendly format')

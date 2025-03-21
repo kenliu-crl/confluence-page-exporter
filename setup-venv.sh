@@ -1,5 +1,5 @@
 #!/bin/bash
-# Setup script for Confluence Email Exporter
+# Setup script for Confluence Page Exporter
 # Creates a virtual environment and installs dependencies
 
 # Exit on error
@@ -14,7 +14,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${YELLOW}Setting up virtual environment for Confluence Email Exporter...${NC}"
+echo -e "${YELLOW}Setting up virtual environment for Confluence Page Exporter...${NC}"
 
 # Check if Python is installed
 if ! command -v python3 &> /dev/null; then
@@ -60,8 +60,8 @@ EOL
 fi
 
 # Make the exporter script executable
-if [ -f "confluence_email_exporter.py" ]; then
-    chmod +x confluence_email_exporter.py
+if [ -f "confluence-page-exporter.py" ]; then
+    chmod +x confluence-page-exporter.py
 fi
 
 echo -e "${GREEN}Setup complete!${NC}"
@@ -70,7 +70,7 @@ echo "To activate the virtual environment in the future, run:"
 echo "  source $VENV_NAME/bin/activate"
 echo ""
 echo "To run the exporter script:"
-echo "  python confluence_email_exporter.py --page-id YOUR_PAGE_ID"
+echo "  python confluence-page-exporter.py --page-id YOUR_PAGE_ID"
 echo ""
 echo "To deactivate the virtual environment when done:"
 echo "  deactivate"

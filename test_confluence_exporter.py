@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unit tests for the Confluence Email Exporter
+Unit tests for the Confluence Page Exporter
 Run with: python3 -m unittest test_confluence_exporter.py
 """
 
@@ -14,7 +14,7 @@ import sys
 import importlib.util
 
 # Import the main script directly (since it has a hyphen in the name)
-script_path = os.path.join(os.path.dirname(__file__), "confluence-email-exporter.py")
+script_path = os.path.join(os.path.dirname(__file__), "confluence-page-exporter.py")
 spec = importlib.util.spec_from_file_location("confluence_exporter", script_path)
 confluence_exporter = importlib.util.module_from_spec(spec)
 sys.modules["confluence_exporter"] = confluence_exporter
