@@ -53,7 +53,8 @@ To generate an API token:
 1. Go to: https://id.atlassian.com/manage-profile/security/api-tokens
 2. Click "Create API token"
 3. Give it a name like "Confluence Email Exporter"
-4. Copy the generated token
+4. Set the expiration date far in the future
+5. Copy the generated token
 
 These credentials will be saved to a `.env` file in the project directory for future use.
 
