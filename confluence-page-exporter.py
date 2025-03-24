@@ -916,7 +916,8 @@ def main():
     # Process a single URL or batch file
     if args.url:
         output_file = args.output or 'confluence_export.html'
-        if process_single_url(args.url, output_file=output_file, generate_text=args.text):
+        output_dir = os.path.dirname(output_file) if output_file != 'confluence_export.html' else None
+        if process_single_url(args.url, output_dir=output_dir, generate_text=args.text):
             print(f"Export completed successfully to {output_file}")
         else:
             print(f"Export failed for {args.url}")
