@@ -3,7 +3,16 @@
 Confluence Page Exporter
 
 This script extracts content from Confluence pages and converts it to
-email-friendly HTML format with proper styling.
+email-friendly HTML format with proper styling. It properly handles images,
+macros, code blocks, user mentions, tables, and other Confluence content.
+
+Features:
+- Converts Confluence storage format to clean, email-friendly HTML
+- Downloads and embeds images directly in the HTML as base64 data URIs
+- Processes user mentions and resolves them to real names
+- Handles Confluence macros like panels, code blocks, emoticons, etc.
+- Supports batch processing of multiple Confluence pages
+- Generates plain text versions alongside HTML if needed
 
 Requirements:
 - Python 3.6+
@@ -16,14 +25,25 @@ Usage:
 1. Set your Confluence credentials in .env file or as environment variables
 2. Run: python confluence-page-exporter.py CONFLUENCE_PAGE_URL [--output OUTPUT_FILE]
 3. For batch processing: python confluence-page-exporter.py --batch URLS_FILE
+
+Image handling options:
+--no-download-images    Disable image downloading and embedding (enabled by default)
+--image-timeout SECONDS Timeout for image downloads (default: 10 seconds)
+--max-image-size MB     Maximum size in MB for image downloads (default: 10MB)
+
+User handling options:
+--no-resolve-users      Disable resolution of user IDs to real names
+--fetch-avatars         Enable fetching user avatars for user mentions
 """
 
-import os
+import os, sys
 import argparse
 import requests
 import json
 import re
 import base64
+import io
+import mimetypes
 from bs4 import BeautifulSoup
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
@@ -54,6 +74,11 @@ VERBOSE_USER_LOGS = False  # Set to True to see detailed logs about user mention
 
 # Enable or disable user resolution (enabled by default)
 RESOLVE_USERS = True  # Always resolve user mentions by default
+
+# Image handling settings
+DOWNLOAD_IMAGES = True  # Download and embed images by default
+IMAGE_DOWNLOAD_TIMEOUT = 10  # 10 seconds timeout for image downloads
+MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB max size for image downloads
 
 # Email style settings
 EMAIL_CSS = """
@@ -198,6 +223,59 @@ def get_auth_header():
     auth_str = f"{CONFLUENCE_USERNAME}:{CONFLUENCE_API_TOKEN}"
     encoded_auth = base64.b64encode(auth_str.encode()).decode()
     return {"Authorization": f"Basic {encoded_auth}"}
+
+
+def download_and_encode_image(image_url):
+    """
+    Download an image from a URL and encode it as a base64 data URI.
+    Returns the data URI string or None if download fails.
+    """
+    if not image_url:
+        return None
+    
+    try:
+        # Add authentication headers if it's from Confluence
+        headers = {}
+        if CONFLUENCE_BASE_URL and image_url.startswith(CONFLUENCE_BASE_URL):
+            headers = get_auth_header()
+        
+        # Download the image with timeout
+        response = requests.get(image_url, headers=headers, timeout=IMAGE_DOWNLOAD_TIMEOUT, 
+                              stream=True)
+        response.raise_for_status()
+        
+        # Check content type and get appropriate MIME type
+        content_type = response.headers.get('Content-Type', '')
+        if not content_type.startswith('image/'):
+            # Try to guess from URL if server didn't provide content type
+            content_type, _ = mimetypes.guess_type(image_url)
+            if not content_type or not content_type.startswith('image/'):
+                content_type = 'image/jpeg'  # Default to JPEG if we can't determine
+        
+        # Check content length if available
+        content_length = response.headers.get('Content-Length')
+        if content_length and int(content_length) > MAX_IMAGE_SIZE:
+            print(f"Image too large ({content_length} bytes, max {MAX_IMAGE_SIZE}): {image_url}")
+            return None
+        
+        # Read image data (with size limit)
+        image_data = io.BytesIO()
+        bytes_read = 0
+        for chunk in response.iter_content(chunk_size=8192):
+            bytes_read += len(chunk)
+            if bytes_read > MAX_IMAGE_SIZE:
+                print(f"Image too large (exceeded {MAX_IMAGE_SIZE} bytes): {image_url}")
+                return None
+            image_data.write(chunk)
+        
+        # Encode as base64
+        encoded_image = base64.b64encode(image_data.getvalue()).decode('utf-8')
+        data_uri = f"data:{content_type};base64,{encoded_image}"
+        return data_uri
+    
+    except Exception as e:
+        print(f"Error downloading image {image_url}: {e}")
+        return None
 
 
 def get_confluence_page(page_id):
@@ -531,15 +609,105 @@ def process_macro_placeholders(html_content, page_id):
             if color:
                 cell['style'] = f"background-color: {color};" + (cell.get('style', '') or '')
     
-    # Process images - replace with a placeholder or download and embed as base64
+    # Process images - download and embed as base64 data URIs
     for image in soup.find_all('ac:image'):
         img_src = image.get('ac:src', '')
         if img_src:
             img_tag = soup.new_tag('img')
-            # You may want to handle image URLs differently
-            img_tag['src'] = f"{CONFLUENCE_BASE_URL}{img_src}" if not img_src.startswith('http') else img_src
-            img_tag['alt'] = "Image from Confluence"
+            
+            # Generate the full image URL
+            full_img_url = f"{CONFLUENCE_BASE_URL}{img_src}" if not img_src.startswith('http') else img_src
+            
+            # Set alt text from filename or default
+            alt_text = os.path.basename(urlparse(img_src).path) if img_src else "Image from Confluence"
+            img_tag['alt'] = alt_text
+            
+            # Get image dimensions if specified
+            img_width = image.get('ac:width', '')
+            img_height = image.get('ac:height', '')
+            if img_width:
+                img_tag['width'] = img_width
+            if img_height:
+                img_tag['height'] = img_height
+            
+            # Download and embed the image if enabled
+            if DOWNLOAD_IMAGES:
+                data_uri = download_and_encode_image(full_img_url)
+                if data_uri:
+                    img_tag['src'] = data_uri
+                else:
+                    # Fallback to direct URL if download fails
+                    img_tag['src'] = full_img_url
+            else:
+                img_tag['src'] = full_img_url
+            
             image.replace_with(img_tag)
+    
+    # Process attached images (alternative image format in Confluence)
+    for attached_image in soup.find_all('ri:attachment', {'ri:filename': True}):
+        # Try to find if this attachment is inside an ac:image tag
+        parent_image = attached_image.find_parent('ac:image')
+        if parent_image:
+            filename = attached_image.get('ri:filename', '')
+            
+            # We need the page ID to construct the attachment URL
+            if page_id:
+                attachment_url = f"{CONFLUENCE_BASE_URL}/download/attachments/{page_id}/{filename}"
+                img_tag = soup.new_tag('img')
+                img_tag['alt'] = filename
+                
+                # Get image dimensions if specified
+                img_width = parent_image.get('ac:width', '')
+                img_height = parent_image.get('ac:height', '')
+                if img_width:
+                    img_tag['width'] = img_width
+                if img_height:
+                    img_tag['height'] = img_height
+                
+                # Download and embed the image if enabled
+                if DOWNLOAD_IMAGES:
+                    data_uri = download_and_encode_image(attachment_url)
+                    if data_uri:
+                        img_tag['src'] = data_uri
+                    else:
+                        # Fallback to direct URL if download fails
+                        img_tag['src'] = attachment_url
+                else:
+                    img_tag['src'] = attachment_url
+                
+                parent_image.replace_with(img_tag)
+    
+    # Process embedded images in ADF format (newer Confluence format)
+    for adf_node in soup.find_all('ac:adf-node', {'type': 'media'}):
+        media_type = None
+        media_id = None
+        
+        # Extract media type and ID from attributes
+        for attr in adf_node.find_all('ac:adf-attribute'):
+            if attr.get('key') == 'type':
+                media_type = attr.text
+            elif attr.get('key') == 'id':
+                media_id = attr.text
+        
+        if media_type == 'file' and media_id and page_id:
+            # Construct the media URL
+            media_url = f"{CONFLUENCE_BASE_URL}/download/attachments/{page_id}/{media_id}"
+            
+            img_tag = soup.new_tag('img')
+            img_tag['alt'] = f"Media {media_id}"
+            
+            # Download and embed the image if enabled
+            if DOWNLOAD_IMAGES:
+                data_uri = download_and_encode_image(media_url)
+                if data_uri:
+                    img_tag['src'] = data_uri
+                else:
+                    # Fallback to direct URL if download fails
+                    img_tag['src'] = media_url
+            else:
+                img_tag['src'] = media_url
+            
+            adf_node.replace_with(img_tag)
     
     # Handle block quotes
     for quote in soup.find_all('blockquote'):
@@ -881,12 +1049,21 @@ def main():
                        help='Fetch user avatars for user mentions')
     parser.add_argument('--verbose-user-logs', action='store_true',
                        help='Enable verbose logging of user mention processing')
+                       
+    # Image handling options
+    parser.add_argument('--no-download-images', action='store_true',
+                       help='Disable image downloading and embedding (enabled by default)')
+    parser.add_argument('--image-timeout', type=int, default=10,
+                       help='Timeout in seconds for image downloads (default: 10)')
+    parser.add_argument('--max-image-size', type=int, default=10,
+                       help='Maximum image size in MB (default: 10MB)')
     
     args = parser.parse_args()
     
     # Override environment variables if provided in arguments
     global CONFLUENCE_BASE_URL, CONFLUENCE_USERNAME, CONFLUENCE_API_TOKEN
     global FETCH_USER_AVATARS, VERBOSE_USER_LOGS, RESOLVE_USERS
+    global DOWNLOAD_IMAGES, IMAGE_DOWNLOAD_TIMEOUT, MAX_IMAGE_SIZE
     
     if args.base_url:
         CONFLUENCE_BASE_URL = args.base_url
@@ -909,6 +1086,21 @@ def main():
     if args.verbose_user_logs:
         VERBOSE_USER_LOGS = True
         print("Verbose user mention logging enabled")
+    
+    # Set image handling options
+    if args.no_download_images:
+        DOWNLOAD_IMAGES = False
+        print("Image downloading and embedding disabled")
+    else:
+        print("Image downloading and embedding enabled (default)")
+        
+    if args.image_timeout:
+        IMAGE_DOWNLOAD_TIMEOUT = args.image_timeout
+        print(f"Image download timeout set to {IMAGE_DOWNLOAD_TIMEOUT} seconds")
+        
+    if args.max_image_size:
+        MAX_IMAGE_SIZE = args.max_image_size * 1024 * 1024  # Convert MB to bytes
+        print(f"Maximum image size set to {args.max_image_size} MB")
     
     # Check and set up environment variables if needed
     check_and_setup_env_variables()

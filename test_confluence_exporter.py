@@ -29,6 +29,7 @@ extract_username_from_mention = confluence_exporter.extract_username_from_mentio
 get_user_info = confluence_exporter.get_user_info
 clean_html_for_email = confluence_exporter.clean_html_for_email
 create_email_html = confluence_exporter.create_email_html
+download_and_encode_image = confluence_exporter.download_and_encode_image
 HTML2TEXT_AVAILABLE = confluence_exporter.HTML2TEXT_AVAILABLE
 
 class TestConfluenceExporter(unittest.TestCase):
@@ -227,6 +228,80 @@ class TestConfluenceExporter(unittest.TestCase):
         self.assertIn('<code class="language-python">print("Hello World")</code>', result)
         self.assertIn('<span class="confluence-emoticon">:)</span>', result)
         self.assertIn('<span class="confluence-page-link">Linked Page</span>', result)
+    
+    @patch('confluence_exporter.download_and_encode_image')
+    @patch('confluence_exporter.DOWNLOAD_IMAGES', True)
+    def test_process_images(self, mock_download):
+        """Test processing images in Confluence content"""
+        # Mock the image download function
+        mock_download.return_value = "data:image/jpeg;base64,MOCKBASE64DATA"
+        
+        # HTML with different image formats
+        html = '''
+        <div>
+            <!-- Standard image -->
+            <ac:image ac:src="/images/test.jpg" ac:width="500" ac:height="300" />
+            
+            <!-- Attachment image -->
+            <ac:image><ri:attachment ri:filename="attachment.png" /></ac:image>
+            
+            <!-- ADF media -->
+            <ac:adf-node type="media">
+                <ac:adf-attribute key="type">file</ac:adf-attribute>
+                <ac:adf-attribute key="id">image-id.jpg</ac:adf-attribute>
+            </ac:adf-node>
+        </div>
+        '''
+        
+        # Set the default values for the test
+        with patch('confluence_exporter.CONFLUENCE_BASE_URL', 'https://example.atlassian.net'):
+            result = process_macro_placeholders(html, '123456')
+            
+            # Check that standard image was properly processed
+            self.assertIn('<img', result)
+            self.assertIn('width="500"', result)
+            self.assertIn('height="300"', result)
+            self.assertIn('src="data:image/jpeg;base64,MOCKBASE64DATA"', result)
+            
+            # Check that attachment image was properly processed
+            self.assertIn('attachment.png', result)
+            
+            # Check that ADF media was properly processed
+            self.assertIn('image-id.jpg', result)
+            
+            # Verify download_and_encode_image was called the right number of times
+            self.assertEqual(mock_download.call_count, 3)
+    
+    @patch('requests.get')
+    def test_download_and_encode_image(self, mock_get):
+        """Test downloading and encoding images"""
+        # Mock successful image download
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {'Content-Type': 'image/jpeg'}
+        mock_response.iter_content.return_value = [b'TESTIMAGE']
+        mock_get.return_value = mock_response
+        
+        # Test successful download
+        result = download_and_encode_image('https://example.com/test.jpg')
+        self.assertTrue(result.startswith('data:image/jpeg;base64,'))
+        
+        # Test with Confluence URL (should add auth headers)
+        with patch('confluence_exporter.CONFLUENCE_BASE_URL', 'https://example.atlassian.net'):
+            result = download_and_encode_image('https://example.atlassian.net/images/test.jpg')
+            self.assertTrue(result.startswith('data:image/jpeg;base64,'))
+            # Verify auth header was added
+            mock_get.assert_called_with(
+                'https://example.atlassian.net/images/test.jpg', 
+                headers=mock.ANY, 
+                timeout=mock.ANY, 
+                stream=True
+            )
+        
+        # Test with failed request
+        mock_get.side_effect = requests.exceptions.RequestException("Test error")
+        result = download_and_encode_image('https://example.com/fail.jpg')
+        self.assertIsNone(result)
     
     @patch('confluence_exporter.get_confluence_page')
     def test_create_email_html(self, mock_get_page):
